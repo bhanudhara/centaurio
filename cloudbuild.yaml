@@ -1,0 +1,78 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - backend/Dockerfile
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPO}/${_API_SERVICE}:$COMMIT_SHA
+      - backend
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPO}/${_API_SERVICE}:$COMMIT_SHA
+
+  - name: gcr.io/google.com/cloudsdktool/google-cloud-cli:stable
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        test "${_INSTANCE_CONNECTION_NAME}" != "SET_ME"
+        gcloud run deploy "${_API_SERVICE}" \
+          --image "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPO}/${_API_SERVICE}:$COMMIT_SHA" \
+          --region "${_REGION}" \
+          --platform managed \
+          --allow-unauthenticated \
+          --port 8080 \
+          --add-cloudsql-instances "${_INSTANCE_CONNECTION_NAME}" \
+          --set-env-vars "NODE_ENV=production,DB_HOST=/cloudsql/${_INSTANCE_CONNECTION_NAME},DB_PORT=5432,DB_NAME=${_DB_NAME},DB_USER=${_DB_USER}" \
+          --set-secrets "DB_PASSWORD=${_DB_SECRET}:latest"
+        gcloud run services describe "${_API_SERVICE}" \
+          --region "${_REGION}" \
+          --format='value(status.url)' > /workspace/api-origin
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - frontend/Dockerfile
+      - --build-arg
+      - VITE_API_URL=/api
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPO}/${_WEB_SERVICE}:$COMMIT_SHA
+      - frontend
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPO}/${_WEB_SERVICE}:$COMMIT_SHA
+
+  - name: gcr.io/google.com/cloudsdktool/google-cloud-cli:stable
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        api_origin="$$(cat /workspace/api-origin)"
+        gcloud run deploy "${_WEB_SERVICE}" \
+          --image "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPO}/${_WEB_SERVICE}:$COMMIT_SHA" \
+          --region "${_REGION}" \
+          --platform managed \
+          --allow-unauthenticated \
+          --port 8080 \
+          --set-env-vars "API_ORIGIN=$$api_origin"
+
+substitutions:
+  _REGION: us-central1
+  _ARTIFACT_REPO: centaurio
+  _API_SERVICE: centaurio-api
+  _WEB_SERVICE: centaurio-web
+  _INSTANCE_CONNECTION_NAME: SET_ME
+  _DB_NAME: taskbuilder
+  _DB_USER: taskbuilder
+  _DB_SECRET: centaurio-db-password
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: 1200s

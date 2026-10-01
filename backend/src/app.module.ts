@@ -1,9 +1,16 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { TasksModule } from './tasks/tasks.module.js';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
+
+const migrationsPath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  'migrations/*.js',
+);
 
 @Module({
   imports: [
@@ -20,6 +27,8 @@ import { AppService } from './app.service.js';
         database: config.get<string>('DB_NAME', 'taskbuilder'),
         autoLoadEntities: true,
         synchronize: config.get<string>('NODE_ENV') !== 'production',
+        migrations: [migrationsPath],
+        migrationsRun: config.get<string>('NODE_ENV') === 'production',
       }),
     }),
     TasksModule,
